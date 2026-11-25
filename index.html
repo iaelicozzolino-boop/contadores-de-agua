@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFFFFF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Lecturas agua">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&display=swap">
+<title>Lecturas de agua</title>
+<style>
+  /* Sistema de diseño Marina Ibiza (mismo que listado-contadores y alarma-guias) */
+  :root {
+    --bg: #FFFFFF; --surface-soft: #F4F6F8; --surface-pressed: #E3E8EF; --line: #E1E5EA;
+    --text: #14181F; --text-dim: #6B7480; --brand: #1F3A68; --brand-tint: #E8EEF6; --focus-ring: #E1E9F4;
+    --danger-bg: #FBECEC; --danger-fg: #A3282B; --alert: #C4302B; --ok: #1E8A4C;
+    --amber: #B7791F; --amber-bg: #FBF3E2;
+    --z1: #1F3A68; --z2: #2F8FBF; --z3: #7A5BB8;
+    --font-sans: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --radius-sm: 9px; --radius-md: 12px; --radius-lg: 16px; --control-h: 44px; --input-h: 48px;
+    --shadow-float: 0 10px 30px rgba(20,24,31,.2);
+    color-scheme: light;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  button, input, select, textarea { font-family: var(--font-sans); }
+  button { cursor: pointer; }
+  main { max-width: 640px; margin: 0 auto; padding: 0 16px calc(env(safe-area-inset-bottom) + 40px); }
+  header { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: calc(env(safe-area-inset-top) + 24px) 16px 0; }
+  .logo { width: min(200px, 56vw); height: auto; display: block; }
+  header h1 { font-size: 12px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: var(--text-dim); }
+  .net { font-size: 11.5px; font-weight: 600; color: var(--text-dim); min-height: 17px; }
+  .net.err { color: var(--danger-fg); }
+
+  .tabs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 4px; background: var(--surface-soft); border-radius: var(--radius-md); margin: 14px 0 16px; position: sticky; top: 8px; z-index: 5; }
+  .tab { min-height: var(--control-h); padding: 6px 2px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); font-size: 12.5px; font-weight: 700; }
+  .tab.active { background: var(--brand); color: #fff; }
+
+  label.lbl { display: block; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px; }
+  input[type=text], input[type=date], input[type=number], input[type=search], select, textarea {
+    width: 100%; height: var(--input-h); padding: 0 14px; border: 1px solid var(--line); border-radius: var(--radius-md);
+    background: #fff; color: var(--text); font: 600 16px var(--font-sans); outline: none; min-width: 0; }
+  textarea { height: 76px; padding: 10px 14px; resize: none; font-weight: 500; }
+  input:focus, select:focus, textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-ring); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .field { margin-bottom: 12px; }
+
+  .card { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px; margin-bottom: 12px; }
+  .card h2 { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .sub { font-size: 12.5px; color: var(--text-dim); font-weight: 500; }
+  .big { font-size: 22px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .btn { height: var(--control-h); padding: 0 16px; border-radius: var(--radius-md); border: 1px solid var(--line); background: #fff; color: var(--text); font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .btn:active { background: var(--surface-pressed); }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .btn.primary:disabled { background: var(--surface-pressed); border-color: var(--surface-pressed); color: var(--text-dim); cursor: not-allowed; }
+  .btn.block { width: 100%; }
+  .actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; margin-top: 10px; }
+  .link { background: none; border: 0; color: var(--brand); font-weight: 700; font-size: 13px; padding: 6px 0; text-decoration: underline; }
+
+  .msg { border-radius: var(--radius-md); padding: 10px 12px; font-size: 13px; font-weight: 600; margin-top: 10px; }
+  .msg.warn { background: var(--amber-bg); color: #7A5213; }
+  .msg.bad { background: var(--danger-bg); color: var(--danger-fg); }
+  .msg.info { background: var(--brand-tint); color: var(--brand); }
+  .msg.good { background: #E7F4EC; color: #176B3B; }
+  .check { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; font-size: 13.5px; font-weight: 600; }
+  .check input { width: 22px; height: 22px; flex: none; accent-color: var(--brand); margin-top: 1px; }
+
+  .chips { display: flex; align-items: center; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
+  .chip { width: 34px; height: 44px; border-radius: 9px; border: 1.5px solid var(--line); background: var(--surface-soft); font: 700 20px var(--font-sans); display: flex; align-items: center; justify-content: center; color: var(--text); padding: 0; }
+  .chip.dec { color: var(--alert); }
+  .chip.pend { border-color: var(--alert); background: var(--danger-bg); color: var(--danger-fg); }
+  .chip.fixed { border-color: var(--brand); background: var(--brand-tint); }
+  .sep { font-weight: 700; font-size: 20px; }
+
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--surface-soft); color: var(--text-dim); }
+  .tag.alert { background: var(--danger-bg); color: var(--danger-fg); }
+  .tag.warn { background: var(--amber-bg); color: #7A5213; }
+  .tag.brand { background: var(--brand-tint); color: var(--brand); }
+
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .seg button { height: 36px; padding: 0 14px; border-radius: 99px; border: 1px solid var(--line); background: #fff; font-weight: 700; font-size: 13px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 6px; }
+  .seg button.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+  .list .item { display: flex; align-items: center; gap: 10px; padding: 11px 2px; border-bottom: 1px solid var(--line); }
+  .list .item:last-child { border-bottom: 0; }
+  .list .grow { flex: 1; min-width: 0; }
+  .list .t { font-weight: 700; }
+  .list .r { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .clickable { cursor: pointer; }
+
+  .scrim { position: fixed; inset: 0; background: rgba(20,24,31,.4); display: flex; align-items: flex-end; justify-content: center; z-index: 20; }
+  .sheet { background: #fff; width: 100%; max-width: 640px; max-height: 92vh; overflow: auto; border-radius: 24px 24px 0 0; padding: 12px 18px calc(env(safe-area-inset-bottom) + 20px); }
+  .grab { width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 12px; }
+  .sheet h3 { font-size: 17px; margin-bottom: 4px; }
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 20px); background: var(--text); color: #fff; padding: 11px 16px; border-radius: var(--radius-md); font-weight: 600; font-size: 13.5px; box-shadow: var(--shadow-float); z-index: 30; max-width: 90vw; }
+  .busy { position: fixed; inset: 0; background: rgba(255,255,255,.8); z-index: 25; display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--brand); text-align: center; padding: 20px; }
+
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12.5px; font-weight: 600; margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  svg text { font-family: var(--font-sans); }
+  .empty { text-align: center; color: var(--text-dim); padding: 28px 8px; font-weight: 600; }
+  h4.sec { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin: 18px 0 8px; }
+</style>
+</head>
+<body>
+<header>
+  <img class="logo" alt="Marina Ibiza" src="logo.webp">
+  <h1>Lecturas de agua</h1>
+  <div class="net" id="net"></div>
+</header>
+<main>
+  <nav class="tabs" id="tabs">
+    <button class="tab" data-tab="registro">Registro</button>
+    <button class="tab" data-tab="grafico">Gráfico</button>
+    <button class="tab" data-tab="totales">Totales</button>
+    <button class="tab" data-tab="historial">Historial</button>
+    <button class="tab" data-tab="ajustes">Ajustes</button>
+  </nav>
+  <div id="app"></div>
+</main>
+<div id="overlay"></div>
+<script src="config.js"></script>
+<script src="lib.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
