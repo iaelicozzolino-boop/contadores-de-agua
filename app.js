@@ -150,7 +150,7 @@
     }
     const ci = chipsInfo(c, st);
     if (ci) {
-      let ch = '<span class="sub" style="width:100%">Lectura detectada. Toca las cifras en rojo cuando las hayas comprobado en el contador:</span>';
+      let ch = '<span class="sub" style="width:100%">Lectura leída de la pantalla. Compara con el contador y toca cada cifra en rojo cuando la hayas comprobado (en pantallas LCD se confunden el 1 con el 7, el 3 con el 8 y el 5 con el 6):</span>';
       ci.items.forEach((x, k) => {
         if (k === c.digitos_enteros) ch += '<span class="sep">,</span>';
         ch += '<button type="button" class="chip ' + (k >= c.digitos_enteros ? 'dec ' : '') + x.cls + '" data-chip="' + id + ':' + x.i + '">' + x.d + '</button>';
@@ -189,32 +189,74 @@
   function cargarScript(src) {
     return new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => ko(new Error('No se pudo cargar ' + src)); document.head.appendChild(s); });
   }
-  async function imagenACanvas(file) {
-    let bmp;
-    try { bmp = await createImageBitmap(file); } catch (e) {
-      bmp = await new Promise((ok, ko) => { const im = new Image(); im.onload = () => ok(im); im.onerror = ko; im.src = URL.createObjectURL(file); });
-    }
-    const w0 = bmp.width, h0 = bmp.height, esc2 = Math.min(1, 1400 / Math.max(w0, h0));
-    const cv = document.createElement('canvas'); cv.width = Math.round(w0 * esc2); cv.height = Math.round(h0 * esc2);
-    const ctx = cv.getContext('2d'); ctx.drawImage(bmp, 0, 0, cv.width, cv.height);
-    const im = ctx.getImageData(0, 0, cv.width, cv.height), px = im.data, hist = new Array(256).fill(0);
-    for (let i = 0; i < px.length; i += 4) { const g = Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]); px[i] = g; hist[g]++; }
-    const total = cv.width * cv.height; let acc = 0, lo = 0, hi = 255;
-    for (let g = 0; g < 256; g++) { acc += hist[g]; if (acc > total * 0.02) { lo = g; break; } }
-    acc = 0; for (let g = 255; g >= 0; g--) { acc += hist[g]; if (acc > total * 0.02) { hi = g; break; } }
-    const rng = Math.max(1, hi - lo);
-    for (let i = 0; i < px.length; i += 4) { const v = Math.max(0, Math.min(255, (px[i] - lo) * 255 / rng)); px[i] = px[i + 1] = px[i + 2] = v; }
-    ctx.putImageData(im, 0, 0); return cv;
+  /* Contadores digitales (LCD de 7 segmentos): el usuario recorta la línea principal de cifras,
+     se enmascara el rojo (recuadro), se binariza con umbral local y se lee con Tesseract. */
+  async function cargarBitmap(file) {
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* respaldo */ }
+    try { return await createImageBitmap(file); } catch (e) { /* respaldo */ }
+    return new Promise((ok, ko) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ko(new Error('No se pudo abrir la imagen')); im.src = URL.createObjectURL(file); });
   }
-  let worker = null;
-  async function leerFoto(file, c) {
-    const n = c.digitos_enteros + 3;
-    if (!window.Tesseract) await cargarScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
-    if (!worker) {
-      worker = await window.Tesseract.createWorker('eng');
-      await worker.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7' });
+  const roiGet = id => { try { const r = JSON.parse(lsGet('roi-' + id)); if (r && r.w > 0.02 && r.h > 0.02) return r; } catch (e) { /* nada */ } return { x: 0.1, y: 0.4, w: 0.8, h: 0.2 }; };
+  let cropResolve = null;
+
+  /* Paso de recorte: devuelve {x,y,w,h} en fracciones de la imagen, o null si se cancela */
+  function recortar(bmp, id, c) {
+    return new Promise(ok => {
+      cropResolve = ok;
+      let r = roiGet(id);
+      const maxW = Math.min(560, window.innerWidth - 36), maxH = Math.round(window.innerHeight * 0.55);
+      const k = Math.min(maxW / bmp.width, maxH / bmp.height), W = Math.round(bmp.width * k), H = Math.round(bmp.height * k);
+      sheet('<h3>Recorta la línea de cifras</h3><div class="sub">Dibuja con el dedo un recuadro que rodee <b>solo el número grande</b> de ' + esc(c.nombre) + '. Deja fuera el recuadro rojo y los números pequeños de abajo. Se recuerda para la próxima vez.</div>' +
+        '<canvas id="crop-cv" width="' + W + '" height="' + H + '" style="width:' + W + 'px;height:' + H + 'px;max-width:100%;touch-action:none;border-radius:12px;margin:12px auto;display:block;border:1px solid var(--line)"></canvas>' +
+        '<div class="actions"><button class="btn" data-act="crop-no">Cancelar</button><button class="btn primary" data-act="crop-ok">Leer cifras</button></div>');
+      const cv = $('#crop-cv'), g = cv.getContext('2d');
+      const pintar = () => {
+        g.drawImage(bmp, 0, 0, W, H); g.fillStyle = 'rgba(20,24,31,.45)'; g.fillRect(0, 0, W, H);
+        const x = r.x * W, y = r.y * H, w = r.w * W, h = r.h * H;
+        g.drawImage(bmp, r.x * bmp.width, r.y * bmp.height, r.w * bmp.width, r.h * bmp.height, x, y, w, h);
+        g.strokeStyle = '#2F8FBF'; g.lineWidth = 3; g.strokeRect(x, y, w, h);
+      };
+      pintar();
+      let ini = null; const pos = ev => { const b = cv.getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (ev.clientX - b.left) / b.width)), y: Math.max(0, Math.min(1, (ev.clientY - b.top) / b.height)) }; };
+      cv.addEventListener('pointerdown', ev => { ini = pos(ev); cv.setPointerCapture(ev.pointerId); });
+      cv.addEventListener('pointermove', ev => { if (!ini) return; const p = pos(ev); r = { x: Math.min(ini.x, p.x), y: Math.min(ini.y, p.y), w: Math.abs(p.x - ini.x), h: Math.abs(p.y - ini.y) }; pintar(); });
+      cv.addEventListener('pointerup', () => { ini = null; });
+      cropResolve = v => { cropResolve = null; ok(v ? (r.w > 0.02 && r.h > 0.02 ? r : null) : null); };
+    });
+  }
+
+  /* Recorte -> escala de grises sin rojo, escala x, umbral local */
+  function prepararLCD(bmp, r, modo) {
+    const sw = Math.max(1, Math.round(r.w * bmp.width)), sh = Math.max(1, Math.round(r.h * bmp.height));
+    const esc2 = Math.min(5, Math.max(1, 140 / sh)), w = Math.round(sw * esc2), h = Math.round(sh * esc2), pad = 24;
+    const cv = document.createElement('canvas'); cv.width = w + pad * 2; cv.height = h + pad * 2;
+    const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.imageSmoothingQuality = 'high'; ctx.drawImage(bmp, r.x * bmp.width, r.y * bmp.height, sw, sh, pad, pad, w, h);
+    const im = ctx.getImageData(pad, pad, w, h), px = im.data, gris = new Float32Array(w * h);
+    for (let i = 0, j = 0; i < px.length; i += 4, j++) {
+      const R = px[i], G = px[i + 1], B = px[i + 2];
+      gris[j] = (R > 70 && R > G * 1.6 && R > B * 1.4) ? 255 : 0.299 * R + 0.587 * G + 0.114 * B; // el recuadro rojo se ignora
     }
-    const cv = await imagenACanvas(file);
+    if (modo === 'binario') {
+      const ii = new Float64Array((w + 1) * (h + 1));
+      for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += gris[y * w + x]; ii[(y + 1) * (w + 1) + x + 1] = ii[y * (w + 1) + x + 1] + row; } }
+      const rad = Math.max(8, Math.round(h / 4));
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const x0 = Math.max(0, x - rad), x1 = Math.min(w, x + rad + 1), y0 = Math.max(0, y - rad), y1 = Math.min(h, y + rad + 1);
+        const s = ii[y1 * (w + 1) + x1] - ii[y0 * (w + 1) + x1] - ii[y1 * (w + 1) + x0] + ii[y0 * (w + 1) + x0], m = s / ((x1 - x0) * (y1 - y0));
+        const v = gris[y * w + x] < m * 0.9 ? 0 : 255, o = (y * w + x) * 4; px[o] = px[o + 1] = px[o + 2] = v; px[o + 3] = 255;
+      }
+    } else {
+      let lo = 255, hi = 0; for (let j = 0; j < gris.length; j++) { if (gris[j] < 255) { if (gris[j] < lo) lo = gris[j]; if (gris[j] > hi) hi = gris[j]; } }
+      const rng = Math.max(1, hi - lo);
+      for (let j = 0, o = 0; j < gris.length; j++, o += 4) { const v = Math.max(0, Math.min(255, (gris[j] - lo) * 255 / rng)); px[o] = px[o + 1] = px[o + 2] = v; px[o + 3] = 255; }
+    }
+    ctx.putImageData(im, pad, pad); return cv;
+  }
+
+  window.__lcd = prepararLCD; // para pruebas
+  let worker = null;
+  async function reconocer(cv) {
     const { data } = await worker.recognize(cv, {}, { blocks: true });
     const sims = [];
     (function walk(o) {
@@ -226,25 +268,50 @@
     let digs = [], conf = [];
     sims.forEach(s => { if (/^\d$/.test(s.text)) { digs.push(s.text); conf.push(Math.round(s.confidence)); } });
     if (!digs.length) { const t = (data.text || '').replace(/\D/g, ''); digs = t.split(''); conf = digs.map(() => 0); }
-    const texto = (data.text || '').trim();
-    if (!digs.length) return { error: 'No se ha detectado ningún número. Prueba con otra foto, con más luz y encuadrando solo las cifras, o escríbelo a mano.', texto, digitos: '', dudosas: [], conf: [] };
+    return { digs, conf, texto: (data.text || '').trim() };
+  }
+
+  async function leerFoto(bmp, r, c) {
+    const n = c.digitos_enteros + 3;
+    if (!window.Tesseract) await cargarScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
+    if (!worker) {
+      worker = await window.Tesseract.createWorker('eng');
+      await worker.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7' });
+    }
+    const intentos = [];
+    for (const modo of ['binario', 'gris']) {
+      const x = await reconocer(prepararLCD(bmp, r, modo));
+      x.puntos = (x.digs.length === n ? 1000 : 0) + (x.conf.length ? x.conf.reduce((a, b) => a + b, 0) / x.conf.length : 0);
+      intentos.push(x);
+    }
+    intentos.sort((a, b) => b.puntos - a.puntos);
+    let { digs, conf, texto } = intentos[0];
+    if (!digs.length) return { error: 'No se ha detectado ningún número. Ajusta el recuadro para que rodee solo las cifras, evita reflejos y limpia la pantalla si puedes. O escríbelo a mano.', texto, digitos: '', dudosas: [], conf: [] };
     let aviso = null;
     if (digs.length !== n) {
-      aviso = 'Se han detectado ' + digs.length + ' cifras y este contador tiene ' + n + ' (' + c.digitos_enteros + ' enteras y 3 decimales). Revisa todas.';
+      aviso = 'Se han detectado ' + digs.length + ' cifras y este contador tiene ' + n + ' (' + c.digitos_enteros + ' enteras y 3 decimales). Revisa todas, o repite el recorte.';
       if (digs.length > n) { digs = digs.slice(-n); conf = conf.slice(-n); } else { while (digs.length < n) { digs.unshift('0'); conf.unshift(0); } }
     }
-    const dudosas = conf.map(x => aviso ? true : x < 85);
+    // En 7 segmentos se confunden 1/7, 3/8, 5/6, 0/8, 6/8: se exige más confianza que con texto impreso.
+    const dudosas = conf.map(x => aviso ? true : x < 90);
     return { digitos: digs.join(''), dudosas, conf, texto, error: aviso };
   }
+
   async function onFoto(id, file) {
     const c = S.contadores.find(x => x.id === id), st = card(id);
     if (!file) return;
-    st.leyendo = true; st.foto = null; st.ack = false; st.conf = new Set(); pintarCard(id);
+    let bmp;
+    try { bmp = await cargarBitmap(file); } catch (e) { toast('No se pudo abrir la foto'); return; }
+    const r = await recortar(bmp, id, c);
+    cerrar();
+    if (!r) return;
+    lsSet('roi-' + id, JSON.stringify(r));
+    st.leyendo = true; st.foto = null; st.ack = false; st.conf = new Set(); st.reseteo = false; pintarCard(id);
     try {
-      const r = await leerFoto(file, c);
-      st.foto = r;
-      if (r.digitos) {
-        const n = r.digitos, e = n.slice(0, c.digitos_enteros).replace(/^0+(?=\d)/, ''), d = n.slice(c.digitos_enteros);
+      const res = await leerFoto(bmp, r, c);
+      st.foto = res;
+      if (res.digitos) {
+        const n = res.digitos, e = n.slice(0, c.digitos_enteros).replace(/^0+(?=\d)/, ''), d = n.slice(c.digitos_enteros);
         st.texto = e + ',' + d; const inp = $('#in-' + id); if (inp) inp.value = st.texto;
       }
     } catch (e) { st.foto = { error: 'Error al leer la foto: ' + e.message + '. Escribe la lectura a mano.', digitos: '', dudosas: [], conf: [], texto: '' }; }
@@ -253,7 +320,7 @@
 
   /* ============ CORRECCIÓN / DETALLE ============ */
   function sheet(html) {
-    $('#overlay').innerHTML = '<div class="scrim" data-act="cerrar"><div class="sheet" onclick="event.stopPropagation()"><div class="grab"></div>' + html + '</div></div>';
+    $('#overlay').innerHTML = '<div class="scrim" data-act="cerrar"><div class="sheet"><div class="grab"></div>' + html + '</div></div>';
   }
   const cerrar = () => { $('#overlay').innerHTML = ''; };
 
@@ -434,7 +501,9 @@
     if (t.dataset.tab) return go(t.dataset.tab);
     if (t.dataset.chip) { const [id, i] = t.dataset.chip.split(':').map(Number); card(id).conf.add(i); return pintarCard(id); }
     const a = t.dataset.act, id = Number(t.dataset.id);
-    if (a === 'cerrar') { if (e.target === t || t.tagName === 'BUTTON') cerrar(); }
+    if (a === 'crop-ok') { if (cropResolve) cropResolve(true); return; }
+    if (a === 'crop-no') { if (cropResolve) cropResolve(false); cerrar(); return; }
+    if (a === 'cerrar') { if (e.target === t || t.tagName === 'BUTTON') { if (cropResolve) cropResolve(false); cerrar(); } }
     else if (a === 'guardar') guardar(id);
     else if (a === 'detalle') detalle(id);
     else if (a === 'corregir') corregir(id);

@@ -4,7 +4,8 @@ PWA para registrar las lecturas diarias de los contadores Botafoc, Centro y Mari
 
 - Datos en Supabase. Las tablas no son accesibles directamente: la app llama a funciones SQL que validan un token.
 - Acceso por enlace: `https://iaelicozzolino-boop.github.io/contadores-de-agua/#t=<token>`
-- OCR de fotos con Tesseract.js en el móvil. Nunca se guarda sin confirmación.
+- Los contadores son digitales (pantalla LCD de 7 segmentos). OCR de fotos con Tesseract.js en el móvil: el operario recorta la línea de cifras, se ignora el recuadro rojo y las líneas secundarias, y nunca se guarda sin confirmación.
+- Marina Seca (Contazara CZ US): la pantalla muestra `0.114400` y se lee como 114,400 m³; en Ajustes tiene que tener 4 dígitos enteros.
 - Diseño igual que el resto de MarinaIbizaApps (Manrope, azul `#1F3A68`).
 
 ## Puesta en marcha
